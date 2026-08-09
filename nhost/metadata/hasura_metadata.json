@@ -1513,7 +1513,7 @@
         "name": "triggerWorkflowRun",
         "definition": {
           "kind": "synchronous",
-          "handler": "{{ACTION_BASE_URL}}/api/actions/trigger-workflow-run",
+          "handler": "https://ai-agent-workflow-builder-teal.vercel.app/api/actions/trigger-workflow-run",
           "forward_client_headers": true,
           "headers": [
             {
@@ -1535,7 +1535,7 @@
         "name": "approveStep",
         "definition": {
           "kind": "synchronous",
-          "handler": "{{ACTION_BASE_URL}}/api/actions/approve-step",
+          "handler": "https://ai-agent-workflow-builder-teal.vercel.app/api/actions/approve-step",
           "forward_client_headers": true,
           "headers": [
             {
