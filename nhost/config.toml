@@ -1,9 +1,8 @@
-# Nhost Project Configuration Template
-# Specifies non-secret project defaults for Nhost CLI / Git deployment.
-# Replace empty string placeholders with your actual Nhost Cloud project details when linking.
+# Nhost Project Configuration
+# https://docs.nhost.io/reference/config
 
-subdomain = ""
-region = ""
+subdomain = "ronqbmjmmogmskjtfjym"
+region = "ap-south-1"
 
 [global]
 node_version = "20"
