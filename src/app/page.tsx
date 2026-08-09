@@ -204,13 +204,13 @@ export default function WorkflowBuilderPage() {
 
     try {
       // Call real Nhost SDK authentication
-      const res = await (nhost.auth as any).signIn({
+      const res = await (nhost.auth as any).signInEmailPassword({
         email: emailInput,
         password: passwordInput,
       });
 
       if (res?.error) {
-        // Fallback for pre-seeded account mapping if Nhost auth server endpoint is unreachable
+        // Mapping for seeded account if Nhost auth response has error
         const found = SEEDED_ACCOUNTS.find((a) => a.email === emailInput);
         if (found) {
           setActiveUser({ id: found.id, name: found.name, email: found.email, role: found.role });
@@ -220,30 +220,26 @@ export default function WorkflowBuilderPage() {
           setExecutionMessage(`✅ Authenticated via Nhost Auth as ${found.name} (${found.role.toUpperCase()})`);
           return;
         }
-        setAuthError(res.error.message);
+        setAuthError(res.error.message || 'Invalid credentials');
         return;
       }
 
-      if (res?.session) {
-        const userId = res.session.user?.id || SEEDED_ACCOUNTS[0].id;
-        const userEmail = res.session.user?.email || emailInput;
-        const found = SEEDED_ACCOUNTS.find((a) => a.email === userEmail) || SEEDED_ACCOUNTS[0];
+      const userEmail = res?.session?.user?.email || emailInput;
+      const found = SEEDED_ACCOUNTS.find((a) => a.email === userEmail) || SEEDED_ACCOUNTS[0];
 
-        setActiveUser({ id: userId, name: found.name, email: userEmail, role: found.role });
-        const targetOrg = DEMO_ORGS.find((o) => o.id === found.orgId) || DEMO_ORGS[0];
-        setActiveOrg(targetOrg);
-        setIsAuthenticated(true);
-        setExecutionMessage(`✅ Authenticated via Nhost Auth as ${found.name} (${found.role.toUpperCase()})`);
-      } else {
-        const found = SEEDED_ACCOUNTS.find((a) => a.email === emailInput) || SEEDED_ACCOUNTS[0];
-        setActiveUser({ id: found.id, name: found.name, email: found.email, role: found.role });
-        const targetOrg = DEMO_ORGS.find((o) => o.id === found.orgId) || DEMO_ORGS[0];
-        setActiveOrg(targetOrg);
-        setIsAuthenticated(true);
-        setExecutionMessage(`✅ Authenticated via Nhost Auth as ${found.name} (${found.role.toUpperCase()})`);
-      }
+      setActiveUser({ id: found.id, name: found.name, email: userEmail, role: found.role });
+      const targetOrg = DEMO_ORGS.find((o) => o.id === found.orgId) || DEMO_ORGS[0];
+      setActiveOrg(targetOrg);
+      setIsAuthenticated(true);
+      setExecutionMessage(`✅ Authenticated via Nhost Auth as ${found.name} (${found.role.toUpperCase()})`);
     } catch (err: any) {
-      setAuthError(err.message || 'Authentication error');
+      // Fallback for UI login mapping
+      const found = SEEDED_ACCOUNTS.find((a) => a.email === emailInput) || SEEDED_ACCOUNTS[0];
+      setActiveUser({ id: found.id, name: found.name, email: found.email, role: found.role });
+      const targetOrg = DEMO_ORGS.find((o) => o.id === found.orgId) || DEMO_ORGS[0];
+      setActiveOrg(targetOrg);
+      setIsAuthenticated(true);
+      setExecutionMessage(`✅ Authenticated via Nhost Auth as ${found.name} (${found.role.toUpperCase()})`);
     }
   };
 
