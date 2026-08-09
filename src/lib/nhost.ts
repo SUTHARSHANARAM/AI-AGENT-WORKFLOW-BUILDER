@@ -1,13 +1,9 @@
-import { createClient, type NhostClient } from '@nhost/nhost-js';
+import { createClient } from '@nhost/nhost-js';
 
-const subdomain: string = process.env.NEXT_PUBLIC_NHOST_SUBDOMAIN || '';
-const region: string = process.env.NEXT_PUBLIC_NHOST_REGION || '';
+const subdomain: string = process.env.NEXT_PUBLIC_NHOST_SUBDOMAIN || 'ronqbmjmmogmskjtfjym';
+const region: string = process.env.NEXT_PUBLIC_NHOST_REGION || 'ap-south-1';
 
-/**
- * Reusable TypeScript-safe Nhost Client for Next.js.
- * Utilizes public environment variables NEXT_PUBLIC_NHOST_SUBDOMAIN and NEXT_PUBLIC_NHOST_REGION.
- */
-export const nhost: NhostClient = createClient({
+export const nhost = createClient({
   subdomain,
   region,
 });

@@ -8,7 +8,6 @@ import {
   Clock,
   Plus,
   Trash2,
-  Edit3,
   Building2,
   ShieldCheck,
   Zap,
@@ -21,16 +20,16 @@ import {
   Bell,
   AlertTriangle,
   RefreshCw,
-  Sliders,
   ChevronRight,
   Layers,
   BarChart3,
   UserCheck,
   Lock,
+  Radio,
+  Send,
 } from 'lucide-react';
 import { StepType, OrgRole } from '@/lib/workflow/types';
 
-// Mock Organizations & User Roles
 interface OrgContext {
   id: string;
   name: string;
@@ -41,14 +40,16 @@ interface OrgContext {
 interface UserContext {
   id: string;
   name: string;
+  email: string;
   role: OrgRole;
 }
 
+// Real database UUIDs seeded in Nhost PostgreSQL database
 const DEMO_ORGS: OrgContext[] = [
   {
     id: '11111111-1111-1111-1111-111111111111',
     name: 'Acme Corp (Org A)',
-    calls_used: 42,
+    calls_used: 43,
     calls_allowed: 1000,
   },
   {
@@ -61,12 +62,12 @@ const DEMO_ORGS: OrgContext[] = [
 
 const DEMO_USERS: Record<string, UserContext[]> = {
   '11111111-1111-1111-1111-111111111111': [
-    { id: '10101010-1010-1010-1010-101010101010', name: 'Alice (Owner)', role: 'owner' },
-    { id: '10201020-1020-1020-1020-102010201020', name: 'Bob (Editor)', role: 'editor' },
-    { id: '10301030-1030-1030-1030-103010301030', name: 'Charlie (Viewer)', role: 'viewer' },
+    { id: '10101010-1010-1010-1010-101010101010', name: 'Alice (Owner)', email: 'alice@acme.com', role: 'owner' },
+    { id: '10201020-1020-1020-1020-102010201020', name: 'Bob (Editor)', email: 'bob@acme.com', role: 'editor' },
+    { id: '10301030-1030-1030-1030-103010301030', name: 'Charlie (Viewer)', email: 'charlie@acme.com', role: 'viewer' },
   ],
   '22222222-2222-2222-2222-222222222222': [
-    { id: '20102010-2010-2010-2010-201020102010', name: 'Diana (Owner)', role: 'owner' },
+    { id: '20102010-2010-2010-2010-201020102010', name: 'Diana (Owner)', email: 'diana@beta.com', role: 'owner' },
   ],
 };
 
@@ -94,7 +95,7 @@ const INITIAL_WORKFLOWS: DemoWorkflow[] = [
     description: 'LLM sentiment analysis, conditional routing, human approval gate, and DB sync.',
     steps: [
       {
-        id: 's-1',
+        id: '10000001-0000-0000-0000-000000000001',
         position: 1,
         name: 'LLM Sentiment & Priority Classifier',
         type: 'llm_call',
@@ -105,12 +106,12 @@ const INITIAL_WORKFLOWS: DemoWorkflow[] = [
         },
       },
       {
-        id: 's-2',
+        id: '10000002-0000-0000-0000-000000000002',
         position: 2,
         name: 'Check High Urgency Condition',
         type: 'conditional_branch',
         config: {
-          field: 'text',
+          field: 'last_output.text',
           operator: 'contains',
           value: 'URGENT',
           true_step_position: 3,
@@ -118,7 +119,7 @@ const INITIAL_WORKFLOWS: DemoWorkflow[] = [
         },
       },
       {
-        id: 's-3',
+        id: '10000003-0000-0000-0000-000000000003',
         position: 3,
         name: 'Manager Escalation Approval Gate',
         type: 'approval_gate',
@@ -128,7 +129,7 @@ const INITIAL_WORKFLOWS: DemoWorkflow[] = [
         },
       },
       {
-        id: 's-4',
+        id: '10000004-0000-0000-0000-000000000004',
         position: 4,
         name: 'Dispatch HTTP CRM Webhook',
         type: 'http_request',
@@ -140,7 +141,7 @@ const INITIAL_WORKFLOWS: DemoWorkflow[] = [
         },
       },
       {
-        id: 's-5',
+        id: '10000005-0000-0000-0000-000000000005',
         position: 5,
         name: 'Save Execution Record to DB',
         type: 'db_write',
@@ -150,7 +151,7 @@ const INITIAL_WORKFLOWS: DemoWorkflow[] = [
         },
       },
       {
-        id: 's-6',
+        id: '10000006-0000-0000-0000-000000000006',
         position: 6,
         name: 'Send Slack Notification',
         type: 'notify',
@@ -172,15 +173,15 @@ export default function WorkflowBuilderPage() {
   const [workflows, setWorkflows] = useState<DemoWorkflow[]>(INITIAL_WORKFLOWS);
   const [selectedWorkflow, setSelectedWorkflow] = useState<DemoWorkflow>(INITIAL_WORKFLOWS[0]);
 
-  // Execution State
+  // Execution & Live Stream State
   const [isRunning, setIsRunning] = useState(false);
   const [runId, setRunId] = useState<string | null>(null);
   const [runStatus, setRunStatus] = useState<string>('idle');
-  const [stepLogs, setStepLogs] = useState<any[]>([]);
+  const [liveStepRuns, setLiveStepRuns] = useState<any[]>([]);
   const [pausedStepInfo, setPausedStepInfo] = useState<any>(null);
   const [executionMessage, setExecutionMessage] = useState<string | null>(null);
 
-  // Modal / Drawer state for adding/editing steps
+  // Modal State
   const [isAddStepOpen, setIsAddStepOpen] = useState(false);
   const [newStepType, setNewStepType] = useState<StepType>('llm_call');
   const [newStepName, setNewStepName] = useState('');
@@ -195,34 +196,67 @@ export default function WorkflowBuilderPage() {
     const orgWfs = workflows.filter((w) => w.org_id === org.id);
     if (orgWfs.length > 0) {
       setSelectedWorkflow(orgWfs[0]);
-    } else {
-      const newWf: DemoWorkflow = {
-        id: `wf-${Date.now()}`,
-        org_id: org.id,
-        name: `${org.name} Starter Workflow`,
-        description: 'New workflow created for organization.',
-        steps: [
-          {
-            id: `s-${Date.now()}`,
-            position: 1,
-            name: 'Initial LLM Analysis',
-            type: 'llm_call',
-            config: { model: 'llama-3.3-70b-versatile', prompt: 'Process data for org' },
-          },
-        ],
-      };
-      setWorkflows((prev) => [...prev, newWf]);
-      setSelectedWorkflow(newWf);
     }
   };
 
-  // Add Step to Selected Workflow
+  // Live SSE Stream Listener
+  useEffect(() => {
+    if (!runId) return;
+
+    const eventSource = new EventSource(`/api/workflow/runs/stream?run_id=${runId}`);
+
+    eventSource.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        if (data) {
+          setRunStatus(data.status);
+          if (data.step_runs) {
+            setLiveStepRuns(data.step_runs);
+          }
+
+          if (data.status === 'paused') {
+            const pausedStep = (data.step_runs || []).find((sr: any) => sr.status === 'paused');
+            setPausedStepInfo({
+              stepRunId: pausedStep?.id || 's0000003-0000-0000-0000-000000000003',
+              stepName: pausedStep?.workflow_step?.name || 'Manager Escalation Approval Gate',
+              approverRole: 'editor',
+              message: 'Approval Gate reached. Awaiting manual sign-off to proceed.',
+            });
+            setExecutionMessage('⏸️ Live Stream: Workflow execution PAUSED at Approval Gate.');
+          } else if (data.status === 'completed') {
+            setPausedStepInfo(null);
+            setExecutionMessage('✅ Live Stream: Workflow run completed successfully!');
+          }
+        }
+      } catch (err) {
+        console.error('[Live Stream Parse Error]:', err);
+      }
+    };
+
+    return () => {
+      eventSource.close();
+    };
+  }, [runId]);
+
+  // Layer 2 Owner-Only Step Check
+  const isOwnerOnlyStepType = (type: StepType) => {
+    return type === 'db_write' || type === 'notify' || type === 'http_request';
+  };
+
+  // Add Step Handler (Layer 2 Owner-Gated for db_write/notify/http)
   const handleAddStep = () => {
     if (!newStepName.trim()) return;
 
+    // Layer 2 Privilege Enforcement
+    if (isOwnerOnlyStepType(newStepType) && activeUser.role !== 'owner') {
+      setExecutionMessage(`❌ Layer 2 Security Violation: Adding step type '${newStepType}' requires Owner role. Role '${activeUser.role}' denied.`);
+      setIsAddStepOpen(false);
+      return;
+    }
+
     const newPos = selectedWorkflow.steps.length + 1;
     const newStep: StepConfig = {
-      id: `s-${Date.now()}`,
+      id: `s000000${newPos}-0000-0000-0000-00000000000${newPos}`,
       position: newPos,
       name: newStepName,
       type: newStepType,
@@ -232,7 +266,7 @@ export default function WorkflowBuilderPage() {
           : newStepType === 'http_request'
           ? { method: 'POST', url: 'https://httpbin.org/post' }
           : newStepType === 'conditional_branch'
-          ? { field: 'status', operator: 'equals', value: 'approved' }
+          ? { field: 'last_output.text', operator: 'contains', value: 'URGENT' }
           : newStepType === 'approval_gate'
           ? { approver_role: 'editor', approval_message: 'Requires approval' }
           : newStepType === 'db_write'
@@ -263,7 +297,7 @@ export default function WorkflowBuilderPage() {
     setWorkflows((prev) => prev.map((w) => (w.id === updated.id ? updated : w)));
   };
 
-  // Execute Workflow via Server API
+  // Trigger Manual Run via Hasura Action triggerWorkflowRun
   const handleTriggerRun = async () => {
     if (activeUser.role === 'viewer') {
       setExecutionMessage('❌ Unauthorized: Viewer role cannot trigger workflow execution.');
@@ -272,19 +306,26 @@ export default function WorkflowBuilderPage() {
 
     setIsRunning(true);
     setRunStatus('running');
-    setStepLogs([]);
+    setLiveStepRuns([]);
     setPausedStepInfo(null);
-    setExecutionMessage('⚡ Executing workflow steps sequentially...');
+    setExecutionMessage('⚡ Calling Hasura Action triggerWorkflowRun(workflow_id)...');
     setActiveTab('runs');
 
     try {
-      const response = await fetch('/api/workflow/execute', {
+      const response = await fetch('/api/actions/trigger-workflow-run', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'x-hasura-user-id': activeUser.id,
+        },
         body: JSON.stringify({
-          workflow_id: selectedWorkflow.id,
-          user_id: activeUser.id,
-          input: { ticketText: 'URGENT: Database connection pool high latency warning!' },
+          input: {
+            workflow_id: selectedWorkflow.id,
+          },
+          session_variables: {
+            'x-hasura-user-id': activeUser.id,
+            'x-hasura-role': activeUser.role,
+          },
         }),
       });
 
@@ -292,7 +333,7 @@ export default function WorkflowBuilderPage() {
 
       if (!response.ok) {
         setRunStatus('failed');
-        setExecutionMessage(`❌ Execution Error (${response.status}): ${resData.message}`);
+        setExecutionMessage(`❌ Hasura Action Error (${response.status}): ${resData.message}`);
         setIsRunning(false);
         return;
       }
@@ -302,14 +343,14 @@ export default function WorkflowBuilderPage() {
 
       if (resData.status === 'paused') {
         setPausedStepInfo({
+          stepRunId: 's0000003-0000-0000-0000-000000000003',
           stepName: 'Manager Escalation Approval Gate',
           approverRole: 'editor',
           message: 'Approval Gate reached. Awaiting manual sign-off to proceed.',
         });
-        setExecutionMessage('⏸️ Workflow execution PAUSED at Approval Gate. Awaiting sign-off.');
+        setExecutionMessage('⏸️ Hasura Action: Execution PAUSED at Approval Gate. Awaiting sign-off.');
       } else if (resData.status === 'completed') {
-        setExecutionMessage('✅ Workflow completed successfully! All steps executed and quota updated.');
-        // Increment quota locally for display
+        setExecutionMessage('✅ Hasura Action triggerWorkflowRun completed successfully!');
         setActiveOrg((prev) => ({ ...prev, calls_used: prev.calls_used + 1 }));
       }
     } catch (err: any) {
@@ -320,7 +361,42 @@ export default function WorkflowBuilderPage() {
     }
   };
 
-  // Resume Approval Gate via approveStep Hasura Action
+  // Non-Manual Webhook Trigger
+  const handleTriggerWebhook = async () => {
+    setIsRunning(true);
+    setExecutionMessage('⚡ Triggering Inbound Webhook Event (/api/triggers/webhook)...');
+    setActiveTab('runs');
+
+    try {
+      const response = await fetch('/api/triggers/webhook', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          workflow_id: selectedWorkflow.id,
+          payload: { ticketText: 'URGENT: High latency in DB connection pool!', source: 'external_crm_webhook' },
+        }),
+      });
+
+      const resData = await response.json();
+
+      if (!response.ok) {
+        setExecutionMessage(`❌ Webhook Error (${response.status}): ${resData.message}`);
+        setIsRunning(false);
+        return;
+      }
+
+      setRunId(resData.workflow_run_id);
+      setRunStatus(resData.status);
+      setExecutionMessage(`⚡ Non-Manual Webhook Trigger executed! Run ID: ${resData.workflow_run_id}`);
+      setActiveOrg((prev) => ({ ...prev, calls_used: prev.calls_used + 1 }));
+    } catch (err: any) {
+      setExecutionMessage(`❌ Webhook Error: ${err.message}`);
+    } finally {
+      setIsRunning(false);
+    }
+  };
+
+  // Resume Approval Gate via Hasura Action approveStep
   const handleApproveResume = async () => {
     if (activeUser.role === 'viewer') {
       setExecutionMessage('❌ Unauthorized: Viewer role cannot approve workflow gates.');
@@ -330,7 +406,7 @@ export default function WorkflowBuilderPage() {
     if (!runId) return;
 
     setIsRunning(true);
-    setExecutionMessage('⚡ Resuming workflow execution via approveStep Hasura Action...');
+    setExecutionMessage('⚡ Calling Hasura Action approveStep(step_run_id)...');
 
     try {
       const response = await fetch('/api/actions/approve-step', {
@@ -341,27 +417,26 @@ export default function WorkflowBuilderPage() {
         },
         body: JSON.stringify({
           input: {
-            step_run_id: pausedStepInfo?.stepRunId || '00000000-0000-0000-0000-000000000000',
+            step_run_id: pausedStepInfo?.stepRunId || 's0000003-0000-0000-0000-000000000003',
           },
           session_variables: {
             'x-hasura-user-id': activeUser.id,
             'x-hasura-role': activeUser.role,
           },
-          workflow_run_id: runId,
         }),
       });
 
       const resData = await response.json();
 
       if (!response.ok) {
-        setExecutionMessage(`❌ Action Error (${response.status}): ${resData.message}`);
+        setExecutionMessage(`❌ approveStep Action Error (${response.status}): ${resData.message}`);
         setIsRunning(false);
         return;
       }
 
       setRunStatus(resData.status);
       setPausedStepInfo(null);
-      setExecutionMessage('✅ approveStep Action successful! Remaining workflow steps executed.');
+      setExecutionMessage('✅ approveStep Hasura Action successful! Remaining workflow steps executed.');
       setActiveOrg((prev) => ({ ...prev, calls_used: prev.calls_used + 1 }));
     } catch (err: any) {
       setExecutionMessage(`❌ Error resuming approval: ${err.message}`);
@@ -407,7 +482,7 @@ export default function WorkflowBuilderPage() {
           </div>
         </div>
 
-        {/* Org & Role Switcher */}
+        {/* Org & User Session Switcher */}
         <div className="flex items-center gap-4">
           {/* Org Selector */}
           <div className="flex items-center gap-2 bg-slate-900/90 border border-slate-800 rounded-lg px-3 py-1.5 text-xs">
@@ -426,7 +501,7 @@ export default function WorkflowBuilderPage() {
             </select>
           </div>
 
-          {/* User & Role Switcher */}
+          {/* User Session Selector */}
           <div className="flex items-center gap-2 bg-slate-900/90 border border-slate-800 rounded-lg px-3 py-1.5 text-xs">
             <UserCheck className="w-4 h-4 text-indigo-400" />
             <span className="text-slate-400">User:</span>
@@ -539,7 +614,7 @@ export default function WorkflowBuilderPage() {
                 }`}
               >
                 <Activity className="w-4 h-4" />
-                Execution Monitor & Logs
+                Execution Monitor & Live Stream
               </button>
               <button
                 onClick={() => setActiveTab('usage')}
@@ -554,21 +629,35 @@ export default function WorkflowBuilderPage() {
               </button>
             </div>
 
-            {/* Run Action Trigger Button */}
-            <button
-              onClick={handleTriggerRun}
-              disabled={isRunning || activeUser.role === 'viewer'}
-              className={`gradient-btn text-white px-5 py-2 rounded-xl text-sm font-semibold flex items-center gap-2 shadow-lg ${
-                activeUser.role === 'viewer' ? 'opacity-50 cursor-not-allowed' : ''
-              }`}
-            >
-              {isRunning ? (
-                <RefreshCw className="w-4 h-4 animate-spin" />
-              ) : (
-                <Play className="w-4 h-4 fill-current" />
-              )}
-              {activeUser.role === 'viewer' ? 'Trigger Disabled (Viewer)' : '▶ Trigger Workflow Run'}
-            </button>
+            {/* Trigger Controls */}
+            <div className="flex items-center gap-3">
+              {/* Webhook Non-Manual Trigger Button */}
+              <button
+                onClick={handleTriggerWebhook}
+                disabled={isRunning}
+                className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-amber-300 border border-amber-500/30 flex items-center gap-1.5 transition-all"
+                title="Trigger via External Webhook Endpoint"
+              >
+                <Radio className="w-3.5 h-3.5 text-amber-400 animate-pulse" />
+                Webhook Trigger
+              </button>
+
+              {/* Hasura Action Manual Run Button */}
+              <button
+                onClick={handleTriggerRun}
+                disabled={isRunning || activeUser.role === 'viewer'}
+                className={`gradient-btn text-white px-5 py-2 rounded-xl text-sm font-semibold flex items-center gap-2 shadow-lg ${
+                  activeUser.role === 'viewer' ? 'opacity-50 cursor-not-allowed' : ''
+                }`}
+              >
+                {isRunning ? (
+                  <RefreshCw className="w-4 h-4 animate-spin" />
+                ) : (
+                  <Play className="w-4 h-4 fill-current" />
+                )}
+                {activeUser.role === 'viewer' ? 'Trigger Disabled (Viewer)' : '▶ Hasura Action Run'}
+              </button>
+            </div>
           </div>
 
           {/* Execution Message Alert */}
@@ -630,6 +719,11 @@ export default function WorkflowBuilderPage() {
                             <span className="text-[10px] px-2 py-0.5 rounded-md bg-slate-800 text-slate-400 uppercase font-mono">
                               {step.type.replace('_', ' ')}
                             </span>
+                            {isOwnerOnlyStepType(step.type) && (
+                              <span className="text-[10px] px-2 py-0.5 rounded-md bg-rose-500/10 text-rose-400 border border-rose-500/20 font-semibold uppercase">
+                                Layer 2 Owner Gated
+                              </span>
+                            )}
                           </div>
 
                           {/* Step Config Summary */}
@@ -667,7 +761,7 @@ export default function WorkflowBuilderPage() {
             </div>
           )}
 
-          {/* TAB 2: EXECUTION MONITOR & APPROVAL CARD */}
+          {/* TAB 2: LIVE STREAM EXECUTION MONITOR & APPROVAL CARD */}
           {activeTab === 'runs' && (
             <div className="p-6 flex-1 space-y-6">
               {/* Approval Gate Banner Card if Paused */}
@@ -700,24 +794,25 @@ export default function WorkflowBuilderPage() {
                         className="bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-white font-bold px-5 py-2.5 rounded-xl text-xs flex items-center gap-2 shadow-lg shadow-emerald-500/20 transition-all"
                       >
                         <CheckCircle2 className="w-4 h-4" />
-                        Approve & Resume Execution
+                        Approve via Hasura Action (approveStep)
                       </button>
                     )}
                   </div>
                 </div>
               )}
 
-              {/* Execution Run Logs Timeline */}
+              {/* Live Streaming Step Runs Timeline */}
               <div className="glass-panel p-5 rounded-2xl border border-slate-800">
                 <h3 className="text-sm font-bold text-slate-200 mb-4 flex items-center gap-2">
                   <Activity className="w-4 h-4 text-cyan-400" />
-                  Live Workflow Execution Timeline (Run ID: {runId || 'Not Triggered'})
+                  Live SSE Stream Timeline (Run ID: {runId || 'Not Triggered'})
                 </h3>
 
                 <div className="space-y-3 font-mono text-xs">
                   {selectedWorkflow.steps.map((step) => {
-                    const isStepPaused = pausedStepInfo && step.type === 'approval_gate';
-                    const isCompleted = runStatus === 'completed' || (runStatus === 'paused' && step.position < 3);
+                    const liveStep = liveStepRuns.find((sr) => sr.workflow_step_id === step.id);
+                    const isStepPaused = liveStep?.status === 'paused' || (pausedStepInfo && step.type === 'approval_gate');
+                    const isCompleted = liveStep?.status === 'completed' || runStatus === 'completed' || (runStatus === 'paused' && step.position < 3);
 
                     return (
                       <div
@@ -732,7 +827,7 @@ export default function WorkflowBuilderPage() {
                         <div className="flex items-center gap-3">
                           {isStepPaused ? (
                             <span className="px-2.5 py-1 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/40 text-[11px] flex items-center gap-1.5">
-                              <Clock className="w-3.5 h-3.5 animate-spin" /> PAUSED
+                              <Clock className="w-3.5 h-3.5 animate-spin" /> PAUSED (AWAITING APPROVAL)
                             </span>
                           ) : isCompleted ? (
                             <span className="px-2.5 py-1 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 text-[11px] flex items-center gap-1.5">
@@ -788,7 +883,7 @@ export default function WorkflowBuilderPage() {
         </main>
       </div>
 
-      {/* Add Step Modal */}
+      {/* Add Step Modal (Layer 2 Restricted) */}
       {isAddStepOpen && (
         <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="glass-panel p-6 rounded-2xl border border-slate-700 w-full max-w-md bg-[#0d1322] shadow-2xl">
@@ -814,13 +909,19 @@ export default function WorkflowBuilderPage() {
                   className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-slate-200 focus:outline-none focus:border-cyan-500"
                 >
                   <option value="llm_call">🤖 LLM Call (Groq Llama 3.3)</option>
-                  <option value="http_request">🌐 HTTP Request (REST API)</option>
+                  <option value="http_request">🌐 HTTP Request (Owner Only)</option>
                   <option value="conditional_branch">🔀 Conditional Branch</option>
                   <option value="approval_gate">⏸️ Approval Gate</option>
-                  <option value="db_write">💾 DB Write</option>
-                  <option value="notify">🔔 Notify (Slack/Email)</option>
+                  <option value="db_write">💾 DB Write (Owner Only)</option>
+                  <option value="notify">🔔 Notify (Owner Only)</option>
                 </select>
               </div>
+
+              {isOwnerOnlyStepType(newStepType) && activeUser.role !== 'owner' && (
+                <div className="p-2.5 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-400 text-[11px]">
+                  🔒 Layer 2 Security: Step type &apos;{newStepType}&apos; is owner-gated. Switch role to Owner to add.
+                </div>
+              )}
             </div>
 
             <div className="mt-6 flex justify-end gap-3">
@@ -832,7 +933,10 @@ export default function WorkflowBuilderPage() {
               </button>
               <button
                 onClick={handleAddStep}
-                className="gradient-btn text-white px-4 py-2 rounded-xl text-xs font-bold"
+                disabled={isOwnerOnlyStepType(newStepType) && activeUser.role !== 'owner'}
+                className={`gradient-btn text-white px-4 py-2 rounded-xl text-xs font-bold ${
+                  isOwnerOnlyStepType(newStepType) && activeUser.role !== 'owner' ? 'opacity-40 cursor-not-allowed' : ''
+                }`}
               >
                 Add Step
               </button>
