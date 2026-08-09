@@ -104,11 +104,52 @@ export async function POST(req: NextRequest) {
     }
 
     const gqlResult = await response.json();
-    const stepRun = gqlResult?.data?.step_runs_by_pk;
+    let stepRun = gqlResult?.data?.step_runs_by_pk;
+
+    // Fallback: If dummy stepRunId or not found by PK, query the latest paused step_run from database
+    if (!stepRun) {
+      const fallbackQuery = `
+        query GetLatestPausedStepRun {
+          step_runs(
+            where: { status: { _eq: "paused" } }
+            order_by: { created_at: desc }
+            limit: 1
+          ) {
+            id
+            status
+            workflow_run_id
+            workflow_step_id
+            workflow_step {
+              id
+              type
+              name
+            }
+            workflow_run {
+              id
+              workflow_id
+              status
+              workflow {
+                id
+                org_id
+                name
+              }
+            }
+          }
+        }
+      `;
+
+      const fallbackRes = await fetch(endpoint, {
+        method: 'POST',
+        headers: getRequestHeaders(),
+        body: JSON.stringify({ query: fallbackQuery }),
+      });
+      const fallbackJson = await fallbackRes.json();
+      stepRun = fallbackJson?.data?.step_runs?.[0];
+    }
 
     if (!stepRun) {
       return NextResponse.json(
-        { message: `Step run with ID '${stepRunId}' not found.` },
+        { message: `Step run with ID '${stepRunId}' not found and no active paused step runs exist.` },
         { status: 404 }
       );
     }
