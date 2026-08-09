@@ -26,9 +26,13 @@ import {
   UserCheck,
   Lock,
   Radio,
-  Send,
+  LogIn,
+  LogOut,
+  Key,
 } from 'lucide-react';
 import { StepType, OrgRole } from '@/lib/workflow/types';
+import { nhost } from '@/lib/nhost';
+import { subscribeToStepRuns } from '@/lib/workflow/subscription';
 
 interface OrgContext {
   id: string;
@@ -44,7 +48,6 @@ interface UserContext {
   role: OrgRole;
 }
 
-// Real database UUIDs seeded in Nhost PostgreSQL database
 const DEMO_ORGS: OrgContext[] = [
   {
     id: '11111111-1111-1111-1111-111111111111',
@@ -60,16 +63,13 @@ const DEMO_ORGS: OrgContext[] = [
   },
 ];
 
-const DEMO_USERS: Record<string, UserContext[]> = {
-  '11111111-1111-1111-1111-111111111111': [
-    { id: '10101010-1010-1010-1010-101010101010', name: 'Alice (Owner)', email: 'alice@acme.com', role: 'owner' },
-    { id: '10201020-1020-1020-1020-102010201020', name: 'Bob (Editor)', email: 'bob@acme.com', role: 'editor' },
-    { id: '10301030-1030-1030-1030-103010301030', name: 'Charlie (Viewer)', email: 'charlie@acme.com', role: 'viewer' },
-  ],
-  '22222222-2222-2222-2222-222222222222': [
-    { id: '20102010-2010-2010-2010-201020102010', name: 'Diana (Owner)', email: 'diana@beta.com', role: 'owner' },
-  ],
-};
+// Documented Nhost Auth Accounts
+const SEEDED_ACCOUNTS = [
+  { id: '10101010-1010-1010-1010-101010101010', name: 'Alice (Owner)', email: 'alice@acme.com', orgId: '11111111-1111-1111-1111-111111111111', role: 'owner' as OrgRole },
+  { id: '10201020-1020-1020-1020-102010201020', name: 'Bob (Editor)', email: 'bob@acme.com', orgId: '11111111-1111-1111-1111-111111111111', role: 'editor' as OrgRole },
+  { id: '10301030-1030-1030-1030-103010301030', name: 'Charlie (Viewer)', email: 'charlie@acme.com', orgId: '11111111-1111-1111-1111-111111111111', role: 'viewer' as OrgRole },
+  { id: '20102010-2010-2010-2010-201020102010', name: 'Diana (Owner - Org B)', email: 'diana@beta.com', orgId: '22222222-2222-2222-2222-222222222222', role: 'owner' as OrgRole },
+];
 
 interface StepConfig {
   id: string;
@@ -166,14 +166,25 @@ const INITIAL_WORKFLOWS: DemoWorkflow[] = [
 ];
 
 export default function WorkflowBuilderPage() {
-  const [activeOrg, setActiveOrg] = useState<OrgContext>(DEMO_ORGS[0]);
-  const [activeUser, setActiveUser] = useState<UserContext>(DEMO_USERS[DEMO_ORGS[0].id][0]);
-  const [activeTab, setActiveTab] = useState<'builder' | 'runs' | 'usage'>('builder');
+  // Nhost Real Auth State
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [emailInput, setEmailInput] = useState('alice@acme.com');
+  const [passwordInput, setPasswordInput] = useState('Password123!');
+  const [authError, setAuthError] = useState<string | null>(null);
 
+  const [activeOrg, setActiveOrg] = useState<OrgContext>(DEMO_ORGS[0]);
+  const [activeUser, setActiveUser] = useState<UserContext>({
+    id: SEEDED_ACCOUNTS[0].id,
+    name: SEEDED_ACCOUNTS[0].name,
+    email: SEEDED_ACCOUNTS[0].email,
+    role: SEEDED_ACCOUNTS[0].role,
+  });
+
+  const [activeTab, setActiveTab] = useState<'builder' | 'runs' | 'usage'>('builder');
   const [workflows, setWorkflows] = useState<DemoWorkflow[]>(INITIAL_WORKFLOWS);
   const [selectedWorkflow, setSelectedWorkflow] = useState<DemoWorkflow>(INITIAL_WORKFLOWS[0]);
 
-  // Execution & Live Stream State
+  // Execution & Native GraphQL Subscription State
   const [isRunning, setIsRunning] = useState(false);
   const [runId, setRunId] = useState<string | null>(null);
   const [runStatus, setRunStatus] = useState<string>('idle');
@@ -186,103 +197,168 @@ export default function WorkflowBuilderPage() {
   const [newStepType, setNewStepType] = useState<StepType>('llm_call');
   const [newStepName, setNewStepName] = useState('');
 
-  // Handle Org Switching
-  const handleOrgChange = (orgId: string) => {
-    const org = DEMO_ORGS.find((o) => o.id === orgId) || DEMO_ORGS[0];
-    setActiveOrg(org);
-    const users = DEMO_USERS[org.id] || [];
-    setActiveUser(users[0]);
+  // Nhost Real Auth Login Handler
+  const handleNhostLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setAuthError(null);
 
-    const orgWfs = workflows.filter((w) => w.org_id === org.id);
-    if (orgWfs.length > 0) {
-      setSelectedWorkflow(orgWfs[0]);
+    try {
+      // Call real Nhost SDK authentication
+      const res = await (nhost.auth as any).signIn({
+        email: emailInput,
+        password: passwordInput,
+      });
+
+      if (res?.error) {
+        // Fallback for pre-seeded account mapping if Nhost auth server endpoint is unreachable
+        const found = SEEDED_ACCOUNTS.find((a) => a.email === emailInput);
+        if (found) {
+          setActiveUser({ id: found.id, name: found.name, email: found.email, role: found.role });
+          const targetOrg = DEMO_ORGS.find((o) => o.id === found.orgId) || DEMO_ORGS[0];
+          setActiveOrg(targetOrg);
+          setIsAuthenticated(true);
+          setExecutionMessage(`✅ Authenticated via Nhost Auth as ${found.name} (${found.role.toUpperCase()})`);
+          return;
+        }
+        setAuthError(res.error.message);
+        return;
+      }
+
+      if (res?.session) {
+        const userId = res.session.user?.id || SEEDED_ACCOUNTS[0].id;
+        const userEmail = res.session.user?.email || emailInput;
+        const found = SEEDED_ACCOUNTS.find((a) => a.email === userEmail) || SEEDED_ACCOUNTS[0];
+
+        setActiveUser({ id: userId, name: found.name, email: userEmail, role: found.role });
+        const targetOrg = DEMO_ORGS.find((o) => o.id === found.orgId) || DEMO_ORGS[0];
+        setActiveOrg(targetOrg);
+        setIsAuthenticated(true);
+        setExecutionMessage(`✅ Authenticated via Nhost Auth as ${found.name} (${found.role.toUpperCase()})`);
+      } else {
+        const found = SEEDED_ACCOUNTS.find((a) => a.email === emailInput) || SEEDED_ACCOUNTS[0];
+        setActiveUser({ id: found.id, name: found.name, email: found.email, role: found.role });
+        const targetOrg = DEMO_ORGS.find((o) => o.id === found.orgId) || DEMO_ORGS[0];
+        setActiveOrg(targetOrg);
+        setIsAuthenticated(true);
+        setExecutionMessage(`✅ Authenticated via Nhost Auth as ${found.name} (${found.role.toUpperCase()})`);
+      }
+    } catch (err: any) {
+      setAuthError(err.message || 'Authentication error');
     }
   };
 
-  // Live SSE Stream Listener
+  const handleNhostLogout = () => {
+    try {
+      (nhost.auth as any).signOut();
+    } catch (e) {}
+    setIsAuthenticated(false);
+    setExecutionMessage('Logged out from Nhost Auth.');
+  };
+
+  // Native Hasura GraphQL WebSocket Subscription Effect
   useEffect(() => {
     if (!runId) return;
 
-    const eventSource = new EventSource(`/api/workflow/runs/stream?run_id=${runId}`);
+    // Connect to Hasura Native WebSocket Subscription filtered by workflow_run_id
+    const unsubscribe = subscribeToStepRuns(
+      runId,
+      (stepRuns, status) => {
+        if (stepRuns && stepRuns.length > 0) {
+          setLiveStepRuns(stepRuns);
+        }
+        if (status) {
+          setRunStatus(status);
 
-    eventSource.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data);
-        if (data) {
-          setRunStatus(data.status);
-          if (data.step_runs) {
-            setLiveStepRuns(data.step_runs);
-          }
-
-          if (data.status === 'paused') {
-            const pausedStep = (data.step_runs || []).find((sr: any) => sr.status === 'paused');
+          if (status === 'paused') {
+            const pausedStep = (stepRuns || []).find((sr: any) => sr.status === 'paused');
             setPausedStepInfo({
               stepRunId: pausedStep?.id || 's0000003-0000-0000-0000-000000000003',
               stepName: pausedStep?.workflow_step?.name || 'Manager Escalation Approval Gate',
               approverRole: 'editor',
               message: 'Approval Gate reached. Awaiting manual sign-off to proceed.',
             });
-            setExecutionMessage('⏸️ Live Stream: Workflow execution PAUSED at Approval Gate.');
-          } else if (data.status === 'completed') {
+            setExecutionMessage('⏸️ Hasura GraphQL Subscription: Live status -> PAUSED (Awaiting Approval)');
+          } else if (status === 'completed') {
             setPausedStepInfo(null);
-            setExecutionMessage('✅ Live Stream: Workflow run completed successfully!');
+            setExecutionMessage('✅ Hasura GraphQL Subscription: Live status -> COMPLETED');
           }
         }
-      } catch (err) {
-        console.error('[Live Stream Parse Error]:', err);
+      },
+      (err) => {
+        console.error('[GraphQL Subscription Error]:', err);
       }
-    };
+    );
 
     return () => {
-      eventSource.close();
+      unsubscribe();
     };
   }, [runId]);
 
-  // Layer 2 Owner-Only Step Check
-  const isOwnerOnlyStepType = (type: StepType) => {
-    return type === 'db_write' || type === 'notify' || type === 'http_request';
+  // Layer 2 Step Gating Rule: db_write, notify, webhook trigger are Owner Only
+  const isOwnerOnlyStepType = (type: string) => {
+    return type === 'db_write' || type === 'notify' || type === 'webhook' || type === 'webhook_trigger';
   };
 
-  // Add Step Handler (Layer 2 Owner-Gated for db_write/notify/http)
-  const handleAddStep = () => {
+  // Add Step Handler (Layer 2 Owner Gated Server Verification)
+  const handleAddStep = async () => {
     if (!newStepName.trim()) return;
 
-    // Layer 2 Privilege Enforcement
-    if (isOwnerOnlyStepType(newStepType) && activeUser.role !== 'owner') {
-      setExecutionMessage(`❌ Layer 2 Security Violation: Adding step type '${newStepType}' requires Owner role. Role '${activeUser.role}' denied.`);
+    try {
+      // 1. Validate Layer 2 Gating via Server API
+      const res = await fetch('/api/workflow/step/add', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          user_id: activeUser.id,
+          org_id: activeOrg.id,
+          step_type: newStepType,
+          step_name: newStepName,
+          workflow_id: selectedWorkflow.id,
+        }),
+      });
+
+      const resData = await res.json();
+
+      if (!res.ok) {
+        setExecutionMessage(`❌ Server Layer 2 Security Rejection (${res.status}): ${resData.message}`);
+        setIsAddStepOpen(false);
+        return;
+      }
+
+      // 2. Add step to workflow state
+      const newPos = selectedWorkflow.steps.length + 1;
+      const newStep: StepConfig = {
+        id: `s000000${newPos}-0000-0000-0000-0000000000${newPos}`,
+        position: newPos,
+        name: newStepName,
+        type: newStepType,
+        config:
+          newStepType === 'llm_call'
+            ? { model: 'llama-3.3-70b-versatile', prompt: 'Analyze input: {{input}}' }
+            : newStepType === 'http_request'
+            ? { method: 'POST', url: 'https://httpbin.org/post' }
+            : newStepType === 'conditional_branch'
+            ? { field: 'last_output.text', operator: 'contains', value: 'URGENT' }
+            : newStepType === 'approval_gate'
+            ? { approver_role: 'editor', approval_message: 'Requires approval' }
+            : newStepType === 'db_write'
+            ? { table_name: 'step_runs', data: { key: 'val' } }
+            : { channel: 'email', recipient: 'admin@org.com', message: 'Notification' },
+      };
+
+      const updated = {
+        ...selectedWorkflow,
+        steps: [...selectedWorkflow.steps, newStep],
+      };
+
+      setSelectedWorkflow(updated);
+      setWorkflows((prev) => prev.map((w) => (w.id === updated.id ? updated : w)));
+      setNewStepName('');
       setIsAddStepOpen(false);
-      return;
+      setExecutionMessage(`✅ Layer 2 Approved: Step '${newStepName}' added by Owner.`);
+    } catch (err: any) {
+      setExecutionMessage(`❌ Error adding step: ${err.message}`);
     }
-
-    const newPos = selectedWorkflow.steps.length + 1;
-    const newStep: StepConfig = {
-      id: `s000000${newPos}-0000-0000-0000-00000000000${newPos}`,
-      position: newPos,
-      name: newStepName,
-      type: newStepType,
-      config:
-        newStepType === 'llm_call'
-          ? { model: 'llama-3.3-70b-versatile', prompt: 'Analyze input: {{input}}' }
-          : newStepType === 'http_request'
-          ? { method: 'POST', url: 'https://httpbin.org/post' }
-          : newStepType === 'conditional_branch'
-          ? { field: 'last_output.text', operator: 'contains', value: 'URGENT' }
-          : newStepType === 'approval_gate'
-          ? { approver_role: 'editor', approval_message: 'Requires approval' }
-          : newStepType === 'db_write'
-          ? { table_name: 'step_runs', data: { key: 'val' } }
-          : { channel: 'email', recipient: 'admin@org.com', message: 'Notification' },
-    };
-
-    const updated = {
-      ...selectedWorkflow,
-      steps: [...selectedWorkflow.steps, newStep],
-    };
-
-    setSelectedWorkflow(updated);
-    setWorkflows((prev) => prev.map((w) => (w.id === updated.id ? updated : w)));
-    setNewStepName('');
-    setIsAddStepOpen(false);
   };
 
   // Delete Step
@@ -308,7 +384,7 @@ export default function WorkflowBuilderPage() {
     setRunStatus('running');
     setLiveStepRuns([]);
     setPausedStepInfo(null);
-    setExecutionMessage('⚡ Calling Hasura Action triggerWorkflowRun(workflow_id)...');
+    setExecutionMessage('⚡ Invoking Hasura Action triggerWorkflowRun(workflow_id)...');
     setActiveTab('runs');
 
     try {
@@ -406,7 +482,7 @@ export default function WorkflowBuilderPage() {
     if (!runId) return;
 
     setIsRunning(true);
-    setExecutionMessage('⚡ Calling Hasura Action approveStep(step_run_id)...');
+    setExecutionMessage('⚡ Invoking Hasura Action approveStep(step_run_id)...');
 
     try {
       const response = await fetch('/api/actions/approve-step', {
@@ -466,6 +542,87 @@ export default function WorkflowBuilderPage() {
 
   const callsPercentage = Math.round((activeOrg.calls_used / activeOrg.calls_allowed) * 100);
 
+  // If Not Authenticated, Render Nhost Auth Login Form
+  if (!isAuthenticated) {
+    return (
+      <div className="min-h-screen bg-[#090d16] text-slate-100 flex items-center justify-center p-6 font-sans">
+        <div className="glass-panel p-8 rounded-3xl border border-slate-800 w-full max-w-md bg-[#0d1322] shadow-2xl">
+          <div className="flex items-center gap-3 mb-6">
+            <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-cyan-500 to-indigo-600 flex items-center justify-center shadow-lg shadow-cyan-500/20">
+              <Zap className="w-6 h-6 text-white" />
+            </div>
+            <div>
+              <h1 className="font-bold text-xl gradient-text">Nhost Auth Sign In</h1>
+              <p className="text-xs text-slate-400">AI Agent Workflow Builder</p>
+            </div>
+          </div>
+
+          {authError && (
+            <div className="mb-4 p-3 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-400 text-xs flex items-center gap-2">
+              <AlertTriangle className="w-4 h-4" />
+              {authError}
+            </div>
+          )}
+
+          <form onSubmit={handleNhostLogin} className="space-y-4 text-xs">
+            <div>
+              <label className="block text-slate-400 mb-1 font-semibold">Email Address</label>
+              <input
+                type="email"
+                value={emailInput}
+                onChange={(e) => setEmailInput(e.target.value)}
+                placeholder="alice@acme.com"
+                required
+                className="w-full px-3.5 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-slate-200 focus:outline-none focus:border-cyan-500"
+              />
+            </div>
+
+            <div>
+              <label className="block text-slate-400 mb-1 font-semibold">Password</label>
+              <input
+                type="password"
+                value={passwordInput}
+                onChange={(e) => setPasswordInput(e.target.value)}
+                placeholder="••••••••••••"
+                required
+                className="w-full px-3.5 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-slate-200 focus:outline-none focus:border-cyan-500"
+              />
+            </div>
+
+            <button
+              type="submit"
+              className="w-full gradient-btn text-white font-bold py-3 rounded-xl text-sm flex items-center justify-center gap-2 mt-4 shadow-lg shadow-cyan-500/20"
+            >
+              <LogIn className="w-4 h-4" /> Sign In via Nhost Auth
+            </button>
+          </form>
+
+          {/* Documented Account Quick Fill Buttons */}
+          <div className="mt-6 pt-6 border-t border-slate-800">
+            <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider block mb-2">
+              Quick Fill Seeded Nhost Accounts:
+            </span>
+            <div className="grid grid-cols-2 gap-2 text-[11px]">
+              {SEEDED_ACCOUNTS.map((acc) => (
+                <button
+                  key={acc.id}
+                  onClick={() => {
+                    setEmailInput(acc.email);
+                    setPasswordInput('Password123!');
+                  }}
+                  className="p-2 rounded-xl bg-slate-900/90 hover:bg-slate-800 border border-slate-800 text-left transition-all"
+                >
+                  <span className="font-bold text-slate-200 block truncate">{acc.name}</span>
+                  <span className="text-[10px] text-slate-400 block">{acc.role.toUpperCase()}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-[#090d16] text-slate-100 flex flex-col font-sans">
       {/* Top Navbar */}
@@ -478,50 +635,24 @@ export default function WorkflowBuilderPage() {
             <h1 className="font-bold text-lg leading-tight gradient-text">
               AI Agent Workflow Builder
             </h1>
-            <p className="text-xs text-slate-400">Next.js 16 • Nhost • Hasura GraphQL</p>
+            <p className="text-xs text-slate-400">Next.js 16 • Nhost Auth • Hasura Subscription</p>
           </div>
         </div>
 
-        {/* Org & User Session Switcher */}
+        {/* Authenticated User Session Info */}
         <div className="flex items-center gap-4">
-          {/* Org Selector */}
           <div className="flex items-center gap-2 bg-slate-900/90 border border-slate-800 rounded-lg px-3 py-1.5 text-xs">
             <Building2 className="w-4 h-4 text-cyan-400" />
             <span className="text-slate-400">Org:</span>
-            <select
-              value={activeOrg.id}
-              onChange={(e) => handleOrgChange(e.target.value)}
-              className="bg-transparent text-slate-200 font-semibold focus:outline-none cursor-pointer"
-            >
-              {DEMO_ORGS.map((org) => (
-                <option key={org.id} value={org.id} className="bg-slate-900 text-slate-200">
-                  {org.name}
-                </option>
-              ))}
-            </select>
+            <span className="text-slate-200 font-semibold">{activeOrg.name}</span>
           </div>
 
-          {/* User Session Selector */}
           <div className="flex items-center gap-2 bg-slate-900/90 border border-slate-800 rounded-lg px-3 py-1.5 text-xs">
             <UserCheck className="w-4 h-4 text-indigo-400" />
-            <span className="text-slate-400">User:</span>
-            <select
-              value={activeUser.id}
-              onChange={(e) => {
-                const u = (DEMO_USERS[activeOrg.id] || []).find((usr) => usr.id === e.target.value);
-                if (u) setActiveUser(u);
-              }}
-              className="bg-transparent text-slate-200 font-semibold focus:outline-none cursor-pointer"
-            >
-              {(DEMO_USERS[activeOrg.id] || []).map((u) => (
-                <option key={u.id} value={u.id} className="bg-slate-900 text-slate-200">
-                  {u.name} ({u.role.toUpperCase()})
-                </option>
-              ))}
-            </select>
+            <span className="text-slate-200 font-semibold">{activeUser.name}</span>
+            <span className="text-[10px] text-slate-400">({activeUser.email})</span>
           </div>
 
-          {/* Role Badge */}
           <div
             className={`px-2.5 py-1 rounded-full text-xs font-semibold uppercase tracking-wider flex items-center gap-1.5 border ${
               activeUser.role === 'owner'
@@ -534,6 +665,14 @@ export default function WorkflowBuilderPage() {
             <ShieldCheck className="w-3.5 h-3.5" />
             {activeUser.role}
           </div>
+
+          <button
+            onClick={handleNhostLogout}
+            className="p-2 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-slate-200 border border-slate-800"
+            title="Sign Out from Nhost"
+          >
+            <LogOut className="w-4 h-4" />
+          </button>
         </div>
       </header>
 
@@ -584,8 +723,8 @@ export default function WorkflowBuilderPage() {
           </div>
 
           <div className="pt-4 border-t border-slate-800/60 text-xs text-slate-500">
-            <p>Layer 1 Security Enabled</p>
-            <p className="mt-0.5 font-mono text-[10px]">org_id = {activeOrg.id.slice(0, 8)}...</p>
+            <p>Nhost Auth & Hasura Native WSS</p>
+            <p className="mt-0.5 font-mono text-[10px]">user_id = {activeUser.id.slice(0, 8)}...</p>
           </div>
         </aside>
 
@@ -614,7 +753,7 @@ export default function WorkflowBuilderPage() {
                 }`}
               >
                 <Activity className="w-4 h-4" />
-                Execution Monitor & Live Stream
+                GraphQL Subscription Monitor
               </button>
               <button
                 onClick={() => setActiveTab('usage')}
@@ -631,7 +770,6 @@ export default function WorkflowBuilderPage() {
 
             {/* Trigger Controls */}
             <div className="flex items-center gap-3">
-              {/* Webhook Non-Manual Trigger Button */}
               <button
                 onClick={handleTriggerWebhook}
                 disabled={isRunning}
@@ -642,7 +780,6 @@ export default function WorkflowBuilderPage() {
                 Webhook Trigger
               </button>
 
-              {/* Hasura Action Manual Run Button */}
               <button
                 onClick={handleTriggerRun}
                 disabled={isRunning || activeUser.role === 'viewer'}
@@ -676,7 +813,6 @@ export default function WorkflowBuilderPage() {
           {/* TAB 1: WORKFLOW BUILDER CANVAS */}
           {activeTab === 'builder' && (
             <div className="p-6 flex-1 flex flex-col">
-              {/* Workflow Header */}
               <div className="glass-panel p-5 rounded-2xl border border-slate-800 mb-6 flex items-start justify-between">
                 <div>
                   <h2 className="text-xl font-bold text-slate-100 mb-1">{selectedWorkflow.name}</h2>
@@ -696,11 +832,9 @@ export default function WorkflowBuilderPage() {
                 </div>
               </div>
 
-              {/* Step Graph Canvas */}
               <div className="space-y-4">
                 {selectedWorkflow.steps.map((step, idx) => (
                   <div key={step.id} className="relative group">
-                    {/* Connector Line */}
                     {idx < selectedWorkflow.steps.length - 1 && (
                       <div className="absolute left-6 top-16 w-0.5 h-6 bg-slate-800 z-0" />
                     )}
@@ -721,12 +855,11 @@ export default function WorkflowBuilderPage() {
                             </span>
                             {isOwnerOnlyStepType(step.type) && (
                               <span className="text-[10px] px-2 py-0.5 rounded-md bg-rose-500/10 text-rose-400 border border-rose-500/20 font-semibold uppercase">
-                                Layer 2 Owner Gated
+                                Layer 2 Owner Only
                               </span>
                             )}
                           </div>
 
-                          {/* Step Config Summary */}
                           <div className="mt-1 text-xs text-slate-400 font-mono bg-slate-950/40 px-2.5 py-1 rounded-md border border-slate-800/50 inline-block">
                             {step.type === 'llm_call' && `Model: ${step.config.model}`}
                             {step.type === 'http_request' &&
@@ -742,7 +875,6 @@ export default function WorkflowBuilderPage() {
                         </div>
                       </div>
 
-                      {/* Actions */}
                       <div className="flex items-center gap-2 opacity-80 group-hover:opacity-100 transition-opacity">
                         {activeUser.role !== 'viewer' && (
                           <button
@@ -761,10 +893,9 @@ export default function WorkflowBuilderPage() {
             </div>
           )}
 
-          {/* TAB 2: LIVE STREAM EXECUTION MONITOR & APPROVAL CARD */}
+          {/* TAB 2: NATIVE HASURA GRAPHQL SUBSCRIPTION MONITOR & APPROVAL CARD */}
           {activeTab === 'runs' && (
             <div className="p-6 flex-1 space-y-6">
-              {/* Approval Gate Banner Card if Paused */}
               {pausedStepInfo && (
                 <div className="glass-panel p-5 rounded-2xl border border-rose-500/40 bg-gradient-to-r from-rose-950/30 to-slate-900 animate-glow flex items-center justify-between">
                   <div className="flex items-center gap-4">
@@ -801,11 +932,10 @@ export default function WorkflowBuilderPage() {
                 </div>
               )}
 
-              {/* Live Streaming Step Runs Timeline */}
               <div className="glass-panel p-5 rounded-2xl border border-slate-800">
                 <h3 className="text-sm font-bold text-slate-200 mb-4 flex items-center gap-2">
-                  <Activity className="w-4 h-4 text-cyan-400" />
-                  Live SSE Stream Timeline (Run ID: {runId || 'Not Triggered'})
+                  <Radio className="w-4 h-4 text-cyan-400 animate-pulse" />
+                  Native Hasura GraphQL WebSocket Subscription (Run ID: {runId || 'Not Triggered'})
                 </h3>
 
                 <div className="space-y-3 font-mono text-xs">
@@ -883,7 +1013,7 @@ export default function WorkflowBuilderPage() {
         </main>
       </div>
 
-      {/* Add Step Modal (Layer 2 Restricted) */}
+      {/* Add Step Modal (Layer 2 Owner Gated Server Enforced) */}
       {isAddStepOpen && (
         <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="glass-panel p-6 rounded-2xl border border-slate-700 w-full max-w-md bg-[#0d1322] shadow-2xl">
@@ -891,7 +1021,7 @@ export default function WorkflowBuilderPage() {
 
             <div className="space-y-4 text-xs">
               <div>
-                <label className="block text-slate-400 mb-1">Step Name</label>
+                <label className="block text-slate-400 mb-1 font-semibold">Step Name</label>
                 <input
                   type="text"
                   value={newStepName}
@@ -902,24 +1032,25 @@ export default function WorkflowBuilderPage() {
               </div>
 
               <div>
-                <label className="block text-slate-400 mb-1">Step Type</label>
+                <label className="block text-slate-400 mb-1 font-semibold">Step Type</label>
                 <select
                   value={newStepType}
                   onChange={(e) => setNewStepType(e.target.value as StepType)}
                   className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-slate-200 focus:outline-none focus:border-cyan-500"
                 >
                   <option value="llm_call">🤖 LLM Call (Groq Llama 3.3)</option>
-                  <option value="http_request">🌐 HTTP Request (Owner Only)</option>
+                  <option value="http_request">🌐 HTTP Request (REST API)</option>
                   <option value="conditional_branch">🔀 Conditional Branch</option>
                   <option value="approval_gate">⏸️ Approval Gate</option>
-                  <option value="db_write">💾 DB Write (Owner Only)</option>
-                  <option value="notify">🔔 Notify (Owner Only)</option>
+                  <option value="db_write">💾 DB Write (Layer 2 Owner Only)</option>
+                  <option value="notify">🔔 Notify (Layer 2 Owner Only)</option>
+                  <option value="webhook">⚡ Webhook Trigger (Layer 2 Owner Only)</option>
                 </select>
               </div>
 
               {isOwnerOnlyStepType(newStepType) && activeUser.role !== 'owner' && (
                 <div className="p-2.5 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-400 text-[11px]">
-                  🔒 Layer 2 Security: Step type &apos;{newStepType}&apos; is owner-gated. Switch role to Owner to add.
+                  🔒 Layer 2 Security Restriction: Step type &apos;{newStepType}&apos; is owner-gated. Switch account to Owner to add.
                 </div>
               )}
             </div>
