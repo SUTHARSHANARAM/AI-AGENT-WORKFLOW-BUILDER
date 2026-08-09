@@ -1,0 +1,5 @@
+- name: default
+  kind: postgres
+  tables: '!include default/tables/tables.yaml'
+  configuration:
+    use_prepared_statements: true
