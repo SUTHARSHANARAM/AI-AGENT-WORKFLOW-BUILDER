@@ -61,13 +61,12 @@ const DEMO_ORGS: OrgContext[] = [
 
 const DEMO_USERS: Record<string, UserContext[]> = {
   '11111111-1111-1111-1111-111111111111': [
-    { id: 'u-101', name: 'Alice (Owner)', role: 'owner' },
-    { id: 'u-102', name: 'Bob (Editor)', role: 'editor' },
-    { id: 'u-103', name: 'Charlie (Viewer)', role: 'viewer' },
+    { id: '10101010-1010-1010-1010-101010101010', name: 'Alice (Owner)', role: 'owner' },
+    { id: '10201020-1020-1020-1020-102010201020', name: 'Bob (Editor)', role: 'editor' },
+    { id: '10301030-1030-1030-1030-103010301030', name: 'Charlie (Viewer)', role: 'viewer' },
   ],
   '22222222-2222-2222-2222-222222222222': [
-    { id: 'u-201', name: 'Diana (Owner)', role: 'owner' },
-    { id: 'u-202', name: 'Evan (Viewer)', role: 'viewer' },
+    { id: '20102010-2010-2010-2010-201020102010', name: 'Diana (Owner)', role: 'owner' },
   ],
 };
 
@@ -89,7 +88,7 @@ interface DemoWorkflow {
 
 const INITIAL_WORKFLOWS: DemoWorkflow[] = [
   {
-    id: 'wf-1001',
+    id: '10010010-1001-1001-1001-100100100100',
     org_id: '11111111-1111-1111-1111-111111111111',
     name: 'AI Support Ticket Triage & Approval',
     description: 'LLM sentiment analysis, conditional routing, human approval gate, and DB sync.',

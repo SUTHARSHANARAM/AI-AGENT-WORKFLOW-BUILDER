@@ -22,7 +22,7 @@ function getGraphqlEndpoint(): string {
   const subdomain = process.env.NEXT_PUBLIC_NHOST_SUBDOMAIN || '';
   const region = process.env.NEXT_PUBLIC_NHOST_REGION || 'us-east-1';
   if (subdomain) {
-    return `https://${subdomain}.graphql.${region}.nhost.run/v1/graphql`;
+    return `https://${subdomain}.hasura.${region}.nhost.run/v1/graphql`;
   }
   return '';
 }
@@ -76,7 +76,7 @@ export async function getWorkflowWithSteps(workflowId: string): Promise<Workflow
         created_by
         created_at
         updated_at
-        steps(order_by: { position: asc }) {
+        steps: workflow_steps(order_by: { position: asc }) {
           id
           workflow_id
           position

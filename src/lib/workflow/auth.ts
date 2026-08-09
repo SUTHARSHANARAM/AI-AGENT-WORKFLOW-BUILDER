@@ -45,7 +45,7 @@ export async function verifyOrgMember(
 
   const graphqlUrl = process.env.NHOST_GRAPHQL_URL ||
     (process.env.NEXT_PUBLIC_NHOST_SUBDOMAIN
-      ? `https://${process.env.NEXT_PUBLIC_NHOST_SUBDOMAIN}.graphql.${process.env.NEXT_PUBLIC_NHOST_REGION || 'us-east-1'}.nhost.run/v1/graphql`
+      ? `https://${process.env.NEXT_PUBLIC_NHOST_SUBDOMAIN}.hasura.${process.env.NEXT_PUBLIC_NHOST_REGION || 'us-east-1'}.nhost.run/v1/graphql`
       : '');
 
   const adminSecret = process.env.NHOST_ADMIN_SECRET || '';

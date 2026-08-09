@@ -17,7 +17,7 @@ function getGraphqlEndpoint(): string {
   const subdomain = process.env.NEXT_PUBLIC_NHOST_SUBDOMAIN || '';
   const region = process.env.NEXT_PUBLIC_NHOST_REGION || 'us-east-1';
   if (subdomain) {
-    return `https://${subdomain}.graphql.${region}.nhost.run/v1/graphql`;
+    return `https://${subdomain}.hasura.${region}.nhost.run/v1/graphql`;
   }
   return '';
 }
