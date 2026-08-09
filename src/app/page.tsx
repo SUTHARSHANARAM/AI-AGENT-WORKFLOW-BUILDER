@@ -112,7 +112,7 @@ const INITIAL_WORKFLOWS: DemoWorkflow[] = [
         name: 'Check High Urgency Condition',
         type: 'conditional_branch',
         config: {
-          field: 'ticketText',
+          field: 'last_output.text',
           operator: 'contains',
           value: 'URGENT',
           true_step_position: 3,
