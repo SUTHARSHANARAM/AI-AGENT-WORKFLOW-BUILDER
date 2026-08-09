@@ -76,6 +76,7 @@ export async function POST(req: NextRequest) {
       workflowId,
       triggeredByUserId: userId,
       triggerType: 'manual',
+      initialInput: { ticketText: 'URGENT: High latency in DB connection pool! Requires immediate triage.' },
     });
 
     // 6. Return Hasura Action Output Payload
