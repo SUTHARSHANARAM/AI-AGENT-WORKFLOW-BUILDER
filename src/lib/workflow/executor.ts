@@ -424,7 +424,7 @@ export async function resumeWorkflowRun(
           id
           org_id
           name
-          steps(order_by: { position: asc }) {
+          steps: workflow_steps(order_by: { position: asc }) {
             id
             workflow_id
             position

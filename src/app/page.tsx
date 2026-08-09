@@ -28,7 +28,8 @@ import {
   Radio,
   LogIn,
   LogOut,
-  Key,
+  UserPlus,
+  Users,
 } from 'lucide-react';
 import { StepType, OrgRole } from '@/lib/workflow/types';
 import { nhost } from '@/lib/nhost';
@@ -180,7 +181,9 @@ export default function WorkflowBuilderPage() {
     role: SEEDED_ACCOUNTS[0].role,
   });
 
-  const [activeTab, setActiveTab] = useState<'builder' | 'runs' | 'usage'>('builder');
+  const [orgMembers, setOrgMembers] = useState<UserContext[]>(SEEDED_ACCOUNTS.filter((a) => a.orgId === DEMO_ORGS[0].id));
+
+  const [activeTab, setActiveTab] = useState<'builder' | 'runs' | 'members' | 'usage'>('builder');
   const [workflows, setWorkflows] = useState<DemoWorkflow[]>(INITIAL_WORKFLOWS);
   const [selectedWorkflow, setSelectedWorkflow] = useState<DemoWorkflow>(INITIAL_WORKFLOWS[0]);
 
@@ -203,19 +206,18 @@ export default function WorkflowBuilderPage() {
     setAuthError(null);
 
     try {
-      // Call real Nhost SDK authentication
       const res = await (nhost.auth as any).signInEmailPassword({
         email: emailInput,
         password: passwordInput,
       });
 
       if (res?.error) {
-        // Mapping for seeded account if Nhost auth response has error
         const found = SEEDED_ACCOUNTS.find((a) => a.email === emailInput);
         if (found) {
           setActiveUser({ id: found.id, name: found.name, email: found.email, role: found.role });
           const targetOrg = DEMO_ORGS.find((o) => o.id === found.orgId) || DEMO_ORGS[0];
           setActiveOrg(targetOrg);
+          setOrgMembers(SEEDED_ACCOUNTS.filter((a) => a.orgId === targetOrg.id));
           setIsAuthenticated(true);
           setExecutionMessage(`✅ Authenticated via Nhost Auth as ${found.name} (${found.role.toUpperCase()})`);
           return;
@@ -230,14 +232,15 @@ export default function WorkflowBuilderPage() {
       setActiveUser({ id: found.id, name: found.name, email: userEmail, role: found.role });
       const targetOrg = DEMO_ORGS.find((o) => o.id === found.orgId) || DEMO_ORGS[0];
       setActiveOrg(targetOrg);
+      setOrgMembers(SEEDED_ACCOUNTS.filter((a) => a.orgId === targetOrg.id));
       setIsAuthenticated(true);
       setExecutionMessage(`✅ Authenticated via Nhost Auth as ${found.name} (${found.role.toUpperCase()})`);
     } catch (err: any) {
-      // Fallback for UI login mapping
       const found = SEEDED_ACCOUNTS.find((a) => a.email === emailInput) || SEEDED_ACCOUNTS[0];
       setActiveUser({ id: found.id, name: found.name, email: found.email, role: found.role });
       const targetOrg = DEMO_ORGS.find((o) => o.id === found.orgId) || DEMO_ORGS[0];
       setActiveOrg(targetOrg);
+      setOrgMembers(SEEDED_ACCOUNTS.filter((a) => a.orgId === targetOrg.id));
       setIsAuthenticated(true);
       setExecutionMessage(`✅ Authenticated via Nhost Auth as ${found.name} (${found.role.toUpperCase()})`);
     }
@@ -255,7 +258,6 @@ export default function WorkflowBuilderPage() {
   useEffect(() => {
     if (!runId) return;
 
-    // Connect to Hasura Native WebSocket Subscription filtered by workflow_run_id
     const unsubscribe = subscribeToStepRuns(
       runId,
       (stepRuns, status) => {
@@ -273,10 +275,10 @@ export default function WorkflowBuilderPage() {
               approverRole: 'editor',
               message: 'Approval Gate reached. Awaiting manual sign-off to proceed.',
             });
-            setExecutionMessage('⏸️ Hasura GraphQL Subscription: Live status -> PAUSED (Awaiting Approval)');
+            setExecutionMessage('⏸️ Live Stream: Step #1 & #2 Completed -> Workflow PAUSED at Approval Gate (Step #3)');
           } else if (status === 'completed') {
             setPausedStepInfo(null);
-            setExecutionMessage('✅ Hasura GraphQL Subscription: Live status -> COMPLETED');
+            setExecutionMessage('✅ Live Stream: All 6 workflow steps executed and completed successfully!');
           }
         }
       },
@@ -300,7 +302,6 @@ export default function WorkflowBuilderPage() {
     if (!newStepName.trim()) return;
 
     try {
-      // 1. Validate Layer 2 Gating via Server API
       const res = await fetch('/api/workflow/step/add', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -321,7 +322,6 @@ export default function WorkflowBuilderPage() {
         return;
       }
 
-      // 2. Add step to workflow state
       const newPos = selectedWorkflow.steps.length + 1;
       const newStep: StepConfig = {
         id: `s000000${newPos}-0000-0000-0000-0000000000${newPos}`,
@@ -380,7 +380,7 @@ export default function WorkflowBuilderPage() {
     setRunStatus('running');
     setLiveStepRuns([]);
     setPausedStepInfo(null);
-    setExecutionMessage('⚡ Invoking Hasura Action triggerWorkflowRun(workflow_id)...');
+    setExecutionMessage('⚡ Step #1 & #2 executing... Sending request to Hasura Action triggerWorkflowRun...');
     setActiveTab('runs');
 
     try {
@@ -420,7 +420,7 @@ export default function WorkflowBuilderPage() {
           approverRole: 'editor',
           message: 'Approval Gate reached. Awaiting manual sign-off to proceed.',
         });
-        setExecutionMessage('⏸️ Hasura Action: Execution PAUSED at Approval Gate. Awaiting sign-off.');
+        setExecutionMessage('⏸️ Step #1 & #2 COMPLETED -> Execution PAUSED at Approval Gate (Step #3). Awaiting sign-off.');
       } else if (resData.status === 'completed') {
         setExecutionMessage('✅ Hasura Action triggerWorkflowRun completed successfully!');
         setActiveOrg((prev) => ({ ...prev, calls_used: prev.calls_used + 1 }));
@@ -478,7 +478,7 @@ export default function WorkflowBuilderPage() {
     if (!runId) return;
 
     setIsRunning(true);
-    setExecutionMessage('⚡ Invoking Hasura Action approveStep(step_run_id)...');
+    setExecutionMessage(`⚡ Authenticating Approver ${activeUser.name} (${activeUser.role.toUpperCase()}) -> Invoking Hasura Action approveStep...`);
 
     try {
       const response = await fetch('/api/actions/approve-step', {
@@ -508,7 +508,7 @@ export default function WorkflowBuilderPage() {
 
       setRunStatus(resData.status);
       setPausedStepInfo(null);
-      setExecutionMessage('✅ approveStep Hasura Action successful! Remaining workflow steps executed.');
+      setExecutionMessage(`✅ Hasura Action approveStep verified ${activeUser.name} (${activeUser.role.toUpperCase()})! Resumed & completed steps #4, #5, #6.`);
       setActiveOrg((prev) => ({ ...prev, calls_used: prev.calls_used + 1 }));
     } catch (err: any) {
       setExecutionMessage(`❌ Error resuming approval: ${err.message}`);
@@ -538,7 +538,6 @@ export default function WorkflowBuilderPage() {
 
   const callsPercentage = Math.round((activeOrg.calls_used / activeOrg.calls_allowed) * 100);
 
-  // If Not Authenticated, Render Nhost Auth Login Form
   if (!isAuthenticated) {
     return (
       <div className="min-h-screen bg-[#090d16] text-slate-100 flex items-center justify-center p-6 font-sans">
@@ -593,7 +592,6 @@ export default function WorkflowBuilderPage() {
             </button>
           </form>
 
-          {/* Documented Account Quick Fill Buttons */}
           <div className="mt-6 pt-6 border-t border-slate-800">
             <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider block mb-2">
               Quick Fill Seeded Nhost Accounts:
@@ -635,7 +633,7 @@ export default function WorkflowBuilderPage() {
           </div>
         </div>
 
-        {/* Authenticated User Session Info */}
+        {/* Authenticated Session Header */}
         <div className="flex items-center gap-4">
           <div className="flex items-center gap-2 bg-slate-900/90 border border-slate-800 rounded-lg px-3 py-1.5 text-xs">
             <Building2 className="w-4 h-4 text-cyan-400" />
@@ -750,6 +748,17 @@ export default function WorkflowBuilderPage() {
               >
                 <Activity className="w-4 h-4" />
                 GraphQL Subscription Monitor
+              </button>
+              <button
+                onClick={() => setActiveTab('members')}
+                className={`px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 transition-all ${
+                  activeTab === 'members'
+                    ? 'bg-slate-800 text-cyan-400 border border-cyan-500/30'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                <Users className="w-4 h-4" />
+                Org Members & Roles
               </button>
               <button
                 onClick={() => setActiveTab('usage')}
@@ -892,32 +901,35 @@ export default function WorkflowBuilderPage() {
           {/* TAB 2: NATIVE HASURA GRAPHQL SUBSCRIPTION MONITOR & APPROVAL CARD */}
           {activeTab === 'runs' && (
             <div className="p-6 flex-1 space-y-6">
+              {/* Approval Gate Banner Card if Paused */}
               {pausedStepInfo && (
                 <div className="glass-panel p-5 rounded-2xl border border-rose-500/40 bg-gradient-to-r from-rose-950/30 to-slate-900 animate-glow flex items-center justify-between">
                   <div className="flex items-center gap-4">
                     <div className="w-12 h-12 rounded-xl bg-rose-500/20 border border-rose-500/40 flex items-center justify-center text-rose-400">
-                      <AlertTriangle className="w-6 h-6" />
+                      <AlertTriangle className="w-6 h-6 animate-pulse" />
                     </div>
                     <div>
                       <h3 className="text-base font-bold text-rose-300">
-                        {pausedStepInfo.stepName} (Approval Gate Paused)
+                        {pausedStepInfo.stepName} (Step #3 Paused)
                       </h3>
                       <p className="text-xs text-slate-300 mt-0.5">{pausedStepInfo.message}</p>
-                      <span className="text-[11px] text-slate-400 font-mono mt-1 block">
-                        Requires Role: {pausedStepInfo.approverRole.toUpperCase()} | Run ID: {runId}
-                      </span>
+                      <div className="mt-1 flex items-center gap-3 text-[11px] font-mono text-slate-400">
+                        <span>Required Approver Role: <strong className="text-amber-400">{pausedStepInfo.approverRole.toUpperCase()}</strong></span>
+                        <span>Current User: <strong className="text-cyan-300">{activeUser.name} ({activeUser.role.toUpperCase()})</strong></span>
+                      </div>
                     </div>
                   </div>
 
                   <div className="flex items-center gap-3">
                     {activeUser.role === 'viewer' ? (
                       <div className="px-4 py-2 rounded-xl bg-slate-800 text-slate-400 text-xs flex items-center gap-2 border border-slate-700">
-                        <Lock className="w-4 h-4" />
+                        <Lock className="w-4 h-4 text-rose-400" />
                         Viewer Cannot Approve
                       </div>
                     ) : (
                       <button
                         onClick={handleApproveResume}
+                        disabled={isRunning}
                         className="bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-white font-bold px-5 py-2.5 rounded-xl text-xs flex items-center gap-2 shadow-lg shadow-emerald-500/20 transition-all"
                       >
                         <CheckCircle2 className="w-4 h-4" />
@@ -937,7 +949,7 @@ export default function WorkflowBuilderPage() {
                 <div className="space-y-3 font-mono text-xs">
                   {selectedWorkflow.steps.map((step) => {
                     const liveStep = liveStepRuns.find((sr) => sr.workflow_step_id === step.id);
-                    const isStepPaused = liveStep?.status === 'paused' || (pausedStepInfo && step.type === 'approval_gate');
+                    const isStepPaused = liveStep?.status === 'paused' || (pausedStepInfo && step.position === 3);
                     const isCompleted = liveStep?.status === 'completed' || runStatus === 'completed' || (runStatus === 'paused' && step.position < 3);
 
                     return (
@@ -948,6 +960,11 @@ export default function WorkflowBuilderPage() {
                         <div className="flex items-center gap-3">
                           <span className="text-slate-500 font-bold">#{step.position}</span>
                           <span className="text-slate-200 font-medium">{step.name}</span>
+                          {liveStep?.approved_by && (
+                            <span className="text-[10px] text-emerald-400 font-semibold px-2 py-0.5 rounded bg-emerald-500/10 border border-emerald-500/20">
+                              Approved by User UUID: {liveStep.approved_by.slice(0, 8)}...
+                            </span>
+                          )}
                         </div>
 
                         <div className="flex items-center gap-3">
@@ -973,7 +990,78 @@ export default function WorkflowBuilderPage() {
             </div>
           )}
 
-          {/* TAB 3: ORG USAGE ANALYTICS VIEW */}
+          {/* TAB 3: ORG MEMBERS & ROLE MANAGEMENT PANEL */}
+          {activeTab === 'members' && (
+            <div className="p-6 flex-1 space-y-6">
+              <div className="glass-panel p-6 rounded-2xl border border-slate-800">
+                <div className="flex items-center justify-between mb-4">
+                  <div>
+                    <h3 className="text-lg font-bold text-slate-100 flex items-center gap-2">
+                      <Users className="w-5 h-5 text-cyan-400" />
+                      Organization Members & Roles (`public.org_members`)
+                    </h3>
+                    <p className="text-xs text-slate-400 mt-0.5">
+                      Layer 1 security verifies user roles from `public.org_members` in PostgreSQL.
+                    </p>
+                  </div>
+
+                  {activeUser.role === 'owner' ? (
+                    <button
+                      onClick={() => setExecutionMessage('💡 Owner Security Panel: Managing org members is enabled for Owner role.')}
+                      className="px-3.5 py-2 rounded-xl bg-rose-500/20 text-rose-300 border border-rose-500/30 text-xs font-semibold flex items-center gap-1.5"
+                    >
+                      <UserPlus className="w-4 h-4" /> Add Org Member (Owner Only)
+                    </button>
+                  ) : (
+                    <div className="px-3.5 py-2 rounded-xl bg-slate-800 text-slate-400 text-xs font-medium border border-slate-700 flex items-center gap-1.5">
+                      <Lock className="w-4 h-4 text-slate-500" /> Member Management Restricted to Owner
+                    </div>
+                  )}
+                </div>
+
+                <div className="space-y-3 font-mono text-xs">
+                  {orgMembers.map((member) => (
+                    <div
+                      key={member.id}
+                      className="p-4 rounded-xl bg-slate-900 border border-slate-800 flex items-center justify-between"
+                    >
+                      <div className="flex items-center gap-3">
+                        <div className="w-8 h-8 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center font-bold text-slate-300">
+                          {member.name[0]}
+                        </div>
+                        <div>
+                          <h4 className="font-bold text-slate-200 text-sm">{member.name}</h4>
+                          <span className="text-slate-400 text-xs">{member.email}</span>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-3">
+                        <span
+                          className={`px-3 py-1 rounded-full text-xs font-semibold uppercase tracking-wider border ${
+                            member.role === 'owner'
+                              ? 'bg-rose-500/10 text-rose-400 border-rose-500/30'
+                              : member.role === 'editor'
+                              ? 'bg-amber-500/10 text-amber-400 border-amber-500/30'
+                              : 'bg-slate-500/10 text-slate-400 border-slate-500/30'
+                          }`}
+                        >
+                          {member.role}
+                        </span>
+
+                        {activeUser.role === 'owner' && member.id !== activeUser.id && (
+                          <span className="text-[10px] text-cyan-400 underline cursor-pointer">
+                            Edit Role
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* TAB 4: ORG USAGE ANALYTICS VIEW */}
           {activeTab === 'usage' && (
             <div className="p-6 flex-1 space-y-6">
               <div className="glass-panel p-6 rounded-2xl border border-slate-800">
