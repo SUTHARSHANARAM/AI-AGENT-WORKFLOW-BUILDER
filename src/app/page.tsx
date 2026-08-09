@@ -154,7 +154,7 @@ const INITIAL_WORKFLOWS: DemoWorkflow[] = [
       {
         id: '10000006-0000-0000-0000-000000000006',
         position: 6,
-        name: 'Send Slack Notification',
+        name: 'Send Slack Notification (Event Trigger)',
         type: 'notify',
         config: {
           channel: 'slack',
@@ -273,12 +273,12 @@ export default function WorkflowBuilderPage() {
               stepRunId: pausedStep?.id || 's0000003-0000-0000-0000-000000000003',
               stepName: pausedStep?.workflow_step?.name || 'Manager Escalation Approval Gate',
               approverRole: 'editor',
-              message: 'Approval Gate reached. Awaiting manual sign-off to proceed.',
+              message: 'High priority support ticket requires manager sign-off before notifying VP.',
             });
-            setExecutionMessage('⏸️ Live Stream: Step #1 & #2 Completed -> Workflow PAUSED at Approval Gate (Step #3)');
+            setExecutionMessage('⏸️ Hasura Subscription: Step #1 & #2 COMPLETED -> Execution PAUSED at Approval Gate (Step #3)');
           } else if (status === 'completed') {
             setPausedStepInfo(null);
-            setExecutionMessage('✅ Live Stream: All 6 workflow steps executed and completed successfully!');
+            setExecutionMessage('✅ Hasura Subscription: All 6 workflow steps executed and COMPLETED successfully!');
           }
         }
       },
@@ -380,7 +380,7 @@ export default function WorkflowBuilderPage() {
     setRunStatus('running');
     setLiveStepRuns([]);
     setPausedStepInfo(null);
-    setExecutionMessage('⚡ Step #1 & #2 executing... Sending request to Hasura Action triggerWorkflowRun...');
+    setExecutionMessage('⚡ Step #1 & #2 executing... Invoking Hasura Action triggerWorkflowRun...');
     setActiveTab('runs');
 
     try {
@@ -418,7 +418,7 @@ export default function WorkflowBuilderPage() {
           stepRunId: 's0000003-0000-0000-0000-000000000003',
           stepName: 'Manager Escalation Approval Gate',
           approverRole: 'editor',
-          message: 'Approval Gate reached. Awaiting manual sign-off to proceed.',
+          message: 'High priority support ticket requires manager sign-off before notifying VP.',
         });
         setExecutionMessage('⏸️ Step #1 & #2 COMPLETED -> Execution PAUSED at Approval Gate (Step #3). Awaiting sign-off.');
       } else if (resData.status === 'completed') {
@@ -433,8 +433,13 @@ export default function WorkflowBuilderPage() {
     }
   };
 
-  // Non-Manual Webhook Trigger
+  // Non-Manual Webhook Trigger (Disabled for Viewer Role)
   const handleTriggerWebhook = async () => {
+    if (activeUser.role === 'viewer') {
+      setExecutionMessage('❌ Unauthorized: Viewer role cannot trigger webhook execution.');
+      return;
+    }
+
     setIsRunning(true);
     setExecutionMessage('⚡ Triggering Inbound Webhook Event (/api/triggers/webhook)...');
     setActiveTab('runs');
@@ -445,6 +450,7 @@ export default function WorkflowBuilderPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           workflow_id: selectedWorkflow.id,
+          user_id: activeUser.id,
           payload: { ticketText: 'URGENT: High latency in DB connection pool!', source: 'external_crm_webhook' },
         }),
       });
@@ -452,14 +458,23 @@ export default function WorkflowBuilderPage() {
       const resData = await response.json();
 
       if (!response.ok) {
-        setExecutionMessage(`❌ Webhook Error (${response.status}): ${resData.message}`);
+        setExecutionMessage(`❌ Server Security Rejection (${response.status}): ${resData.message}`);
         setIsRunning(false);
         return;
       }
 
       setRunId(resData.workflow_run_id);
       setRunStatus(resData.status);
-      setExecutionMessage(`⚡ Non-Manual Webhook Trigger executed! Run ID: ${resData.workflow_run_id}`);
+
+      if (resData.status === 'paused') {
+        setPausedStepInfo({
+          stepRunId: 's0000003-0000-0000-0000-000000000003',
+          stepName: 'Manager Escalation Approval Gate',
+          approverRole: 'editor',
+          message: 'High priority support ticket requires manager sign-off before notifying VP.',
+        });
+        setExecutionMessage('⏸️ Webhook Trigger: Step #1 & #2 COMPLETED -> Execution PAUSED at Approval Gate (Step #3)');
+      }
       setActiveOrg((prev) => ({ ...prev, calls_used: prev.calls_used + 1 }));
     } catch (err: any) {
       setExecutionMessage(`❌ Webhook Error: ${err.message}`);
@@ -777,12 +792,16 @@ export default function WorkflowBuilderPage() {
             <div className="flex items-center gap-3">
               <button
                 onClick={handleTriggerWebhook}
-                disabled={isRunning}
-                className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-amber-300 border border-amber-500/30 flex items-center gap-1.5 transition-all"
-                title="Trigger via External Webhook Endpoint"
+                disabled={isRunning || activeUser.role === 'viewer'}
+                className={`px-3.5 py-2 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all ${
+                  activeUser.role === 'viewer'
+                    ? 'bg-slate-900 text-slate-600 border border-slate-800 cursor-not-allowed'
+                    : 'bg-slate-800 hover:bg-slate-700 text-amber-300 border border-amber-500/30'
+                }`}
+                title={activeUser.role === 'viewer' ? 'Webhook Trigger Disabled (Viewer Role)' : 'Trigger via External Webhook Endpoint'}
               >
-                <Radio className="w-3.5 h-3.5 text-amber-400 animate-pulse" />
-                Webhook Trigger
+                <Radio className={`w-3.5 h-3.5 ${activeUser.role === 'viewer' ? 'text-slate-600' : 'text-amber-400 animate-pulse'}`} />
+                {activeUser.role === 'viewer' ? 'Webhook Disabled (Viewer)' : 'Webhook Trigger'}
               </button>
 
               <button
@@ -875,7 +894,7 @@ export default function WorkflowBuilderPage() {
                               `Approver Role: ${step.config.approver_role}`}
                             {step.type === 'db_write' && `Table: ${step.config.table_name}`}
                             {step.type === 'notify' &&
-                              `Channel: ${step.config.channel} -> ${step.config.recipient}`}
+                              `Channel: ${step.config.channel} -> ${step.config.recipient} (Event Trigger)`}
                           </div>
                         </div>
                       </div>
@@ -915,7 +934,7 @@ export default function WorkflowBuilderPage() {
                       <p className="text-xs text-slate-300 mt-0.5">{pausedStepInfo.message}</p>
                       <div className="mt-1 flex items-center gap-3 text-[11px] font-mono text-slate-400">
                         <span>Required Approver Role: <strong className="text-amber-400">{pausedStepInfo.approverRole.toUpperCase()}</strong></span>
-                        <span>Current User: <strong className="text-cyan-300">{activeUser.name} ({activeUser.role.toUpperCase()})</strong></span>
+                        <span>Current Approver: <strong className="text-cyan-300">{activeUser.name} ({activeUser.role.toUpperCase()})</strong></span>
                       </div>
                     </div>
                   </div>
