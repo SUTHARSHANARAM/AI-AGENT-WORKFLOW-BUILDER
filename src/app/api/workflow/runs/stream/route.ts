@@ -25,7 +25,10 @@ export async function GET(req: NextRequest) {
 
   const encoder = new TextEncoder();
   const endpoint = getGraphqlEndpoint();
-  const adminSecret = process.env.NHOST_ADMIN_SECRET || 'ziM0t8,8H&q(iU(=r%67ACMc:k:MnVhk';
+  const adminSecret = process.env.NHOST_ADMIN_SECRET;
+  if (!adminSecret) {
+    return new Response('NHOST_ADMIN_SECRET is not configured', { status: 500 });
+  }
 
   const stream = new ReadableStream({
     async start(controller) {

@@ -25,7 +25,7 @@ export function subscribeToStepRuns(
           type: 'connection_init',
           payload: {
             headers: {
-              'x-hasura-admin-secret': process.env.NHOST_ADMIN_SECRET || 'ziM0t8,8H&q(iU(=r%67ACMc:k:MnVhk',
+              'x-hasura-admin-secret': process.env.NHOST_ADMIN_SECRET || '',
             },
           },
         })

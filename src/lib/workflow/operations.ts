@@ -14,7 +14,10 @@ function getGraphqlEndpoint(): string {
 
 async function queryGraphQL(query: string, variables: Record<string, any> = {}) {
   const endpoint = getGraphqlEndpoint();
-  const adminSecret = process.env.NHOST_ADMIN_SECRET || 'ziM0t8,8H&q(iU(=r%67ACMc:k:MnVhk';
+  const adminSecret = process.env.NHOST_ADMIN_SECRET;
+  if (!adminSecret) {
+    throw new Error('NHOST_ADMIN_SECRET is not configured');
+  }
 
   const res = await fetch(endpoint, {
     method: 'POST',
